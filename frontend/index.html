@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0ea5e9" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg" />
+  <link rel="apple-touch-icon" href="/static/icon.svg" />
+  <title>MedTracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50:  '#f0f9ff',
+              100: '#e0f2fe',
+              400: '#38bdf8',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+  <!-- Login screen -->
+  <div id="loginScreen" class="min-h-screen flex items-center justify-center p-6 hidden">
+    <div class="w-full max-w-sm bg-slate-900 rounded-2xl p-8 shadow-2xl border border-slate-800">
+      <div class="text-center mb-6">
+        <div class="text-4xl mb-2">💊</div>
+        <h1 class="text-2xl font-bold">MedTracker</h1>
+        <p class="text-sm text-slate-400 mt-1">Self-hosted Supplement Tracker</p>
+      </div>
+      <form id="loginForm" class="space-y-3">
+        <input id="loginUser" type="text" autocomplete="username"
+               class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+               placeholder="Username" required />
+        <input id="loginPass" type="password" autocomplete="current-password"
+               class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+               placeholder="Passwort" required />
+        <button type="submit"
+                class="w-full py-2 rounded-lg bg-brand-500 hover:bg-brand-600 font-semibold transition">
+          Anmelden
+        </button>
+        <p id="loginError" class="text-rose-400 text-sm hidden"></p>
+      </form>
+      <p class="text-xs text-slate-500 mt-4 text-center">
+        Beim ersten Start wird automatisch ein Admin-User aus der <code>.env</code> angelegt.
+      </p>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="app" class="hidden">
+    <header class="sticky top-0 z-20 bg-slate-900/80 backdrop-blur border-b border-slate-800">
+      <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">💊</span>
+          <span class="font-bold text-lg">MedTracker</span>
+        </div>
+        <div class="flex items-center gap-3 text-sm">
+          <span id="userBadge" class="text-slate-400"></span>
+          <button id="logoutBtn" class="text-slate-400 hover:text-rose-400 transition">Logout</button>
+        </div>
+      </div>
+      <nav class="max-w-5xl mx-auto px-4 pb-2 flex gap-1 overflow-x-auto">
+        <button data-tab="today"    class="tab px-3 py-1.5 rounded-full text-sm whitespace-nowrap">Heute</button>
+        <button data-tab="supps"    class="tab px-3 py-1.5 rounded-full text-sm whitespace-nowrap">Meine Supplements</button>
+        <button data-tab="catalog"  class="tab px-3 py-1.5 rounded-full text-sm whitespace-nowrap">Katalog</button>
+        <button data-tab="bp"       class="tab px-3 py-1.5 rounded-full text-sm whitespace-nowrap">Blutdruck</button>
+        <button data-tab="stats"    class="tab px-3 py-1.5 rounded-full text-sm whitespace-nowrap">Statistik</button>
+        <button data-tab="profile"  class="tab px-3 py-1.5 rounded-full text-sm whitespace-nowrap">Profil</button>
+      </nav>
+    </header>
+
+    <main class="max-w-5xl mx-auto p-4 pb-24">
+
+      <!-- TODAY -->
+      <section id="tab-today" class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold">Heute auf dem Plan</h2>
+          <button id="refreshToday" class="text-sm text-brand-400 hover:text-brand-300">↻ Aktualisieren</button>
+        </div>
+        <div id="interactionWarnings" class="hidden"></div>
+        <div id="todayList" class="space-y-2"></div>
+      </section>
+
+      <!-- MY SUPPLEMENTS -->
+      <section id="tab-supps" class="space-y-4 hidden">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold">Meine Supplements</h2>
+          <button id="addSuppBtn" class="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 rounded-lg text-sm font-semibold">
+            + Hinzufügen
+          </button>
+        </div>
+        <div id="mySuppsList" class="space-y-2"></div>
+      </section>
+
+      <!-- CATALOG -->
+      <section id="tab-catalog" class="space-y-4 hidden">
+        <h2 class="text-xl font-bold">Supplement-Katalog</h2>
+        <input id="catalogSearch" type="search"
+               placeholder="Suchen..."
+               class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500" />
+        <div id="catalogList" class="grid sm:grid-cols-2 gap-2"></div>
+      </section>
+
+      <!-- BLOOD PRESSURE -->
+      <section id="tab-bp" class="space-y-4 hidden">
+        <h2 class="text-xl font-bold">Blutdruck</h2>
+        <form id="bpForm" class="bg-slate-900 rounded-xl p-4 space-y-3">
+          <div class="grid grid-cols-3 gap-3">
+            <label class="block">
+              <span class="text-xs text-slate-400">Systolisch</span>
+              <input id="bpSys" type="number" required min="50" max="300"
+                     class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
+            </label>
+            <label class="block">
+              <span class="text-xs text-slate-400">Diastolisch</span>
+              <input id="bpDia" type="number" required min="30" max="200"
+                     class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
+            </label>
+            <label class="block">
+              <span class="text-xs text-slate-400">Puls</span>
+              <input id="bpPulse" type="number" min="20" max="250"
+                     class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
+            </label>
+          </div>
+          <button type="submit" class="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded-lg font-semibold">Eintragen</button>
+        </form>
+        <div id="bpList" class="space-y-2"></div>
+      </section>
+
+      <!-- STATS -->
+      <section id="tab-stats" class="space-y-4 hidden">
+        <h2 class="text-xl font-bold">Compliance</h2>
+        <div id="statsContainer" class="space-y-4"></div>
+      </section>
+
+      <!-- PROFILE -->
+      <section id="tab-profile" class="space-y-4 hidden">
+        <h2 class="text-xl font-bold">Profil</h2>
+        <form id="profileForm" class="bg-slate-900 rounded-xl p-4 space-y-4">
+          <label class="block">
+            <span class="text-sm text-slate-400">Körpergewicht (kg) – für Dosierung</span>
+            <input id="profWeight" type="number" step="0.1" min="20" max="300"
+                   class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
+          </label>
+          <div class="grid sm:grid-cols-2 gap-3">
+            <label class="flex items-center gap-2"><input id="profDiscord" type="checkbox" class="accent-brand-500" /> Discord</label>
+            <label class="flex items-center gap-2"><input id="profTelegram" type="checkbox" class="accent-brand-500" /> Telegram</label>
+            <label class="flex items-center gap-2"><input id="profWhatsapp" type="checkbox" class="accent-brand-500" /> WhatsApp</label>
+            <label class="flex items-center gap-2"><input id="profWeb" type="checkbox" class="accent-brand-500" /> Web-Push</label>
+          </div>
+          <button type="submit" class="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded-lg font-semibold">Speichern</button>
+        </form>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Modal: add/edit supplement -->
+  <div id="modal" class="fixed inset-0 bg-black/70 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 rounded-2xl p-6 w-full max-w-md max-h-screen overflow-y-auto border border-slate-800">
+      <div class="flex items-center justify-between mb-4">
+        <h3 id="modalTitle" class="font-bold text-lg">Supplement hinzufügen</h3>
+        <button id="modalClose" class="text-slate-400 hover:text-slate-200">✕</button>
+      </div>
+      <div id="modalBody" class="space-y-3"></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-800 border border-slate-700 px-4 py-2 rounded-lg shadow-xl hidden"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

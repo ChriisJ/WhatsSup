@@ -1,0 +1,64 @@
+/* MedTracker custom styles - supplement Tailwind */
+html, body { -webkit-tap-highlight-color: transparent; }
+
+.tab {
+  background: transparent;
+  color: rgb(148, 163, 184);  /* slate-400 */
+  transition: background 0.15s, color 0.15s;
+}
+.tab:hover { color: rgb(226, 232, 240); }
+.tab.active {
+  background: rgb(14, 165, 233);  /* brand-500 */
+  color: white;
+}
+
+/* Cards / list rows */
+.row-card {
+  background: rgb(15, 23, 42);  /* slate-900 */
+  border: 1px solid rgb(30, 41, 59);  /* slate-800 */
+  transition: border-color 0.15s;
+}
+.row-card:hover { border-color: rgb(51, 65, 85); }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  padding: 0.125rem 0.625rem;
+  border-radius: 9999px;
+  font-weight: 600;
+}
+.pill-pending { background: rgba(234, 179, 8, 0.15); color: rgb(250, 204, 21); }
+.pill-taken   { background: rgba(34, 197, 94, 0.15); color: rgb(74, 222, 128); }
+.pill-skipped { background: rgba(100, 116, 139, 0.15); color: rgb(148, 163, 184); }
+.pill-missed  { background: rgba(244, 63, 94, 0.15); color: rgb(251, 113, 133); }
+.pill-snoozed { background: rgba(168, 85, 247, 0.15); color: rgb(216, 180, 254); }
+
+.severity-info     { background: rgba(56, 189, 248, 0.15); color: rgb(125, 211, 252); }
+.severity-warning  { background: rgba(234, 179, 8, 0.15); color: rgb(250, 204, 21); }
+.severity-danger   { background: rgba(244, 63, 94, 0.15); color: rgb(252, 165, 165); }
+
+/* Button micro-interactions */
+button { transition: transform 0.08s, background 0.15s, opacity 0.15s; }
+button:active:not(:disabled) { transform: scale(0.97); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Compliance bar */
+.bar {
+  height: 8px;
+  border-radius: 9999px;
+  background: rgb(30, 41, 59);
+  overflow: hidden;
+}
+.bar > div {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.4s;
+}
+
+/* Toast slide-in */
+@keyframes toast-in {
+  from { transform: translate(-50%, 20px); opacity: 0; }
+  to   { transform: translate(-50%, 0); opacity: 1; }
+}
+#toast.show { animation: toast-in 0.25s ease-out; }

@@ -1,0 +1,17 @@
+{
+  "name": "MedTracker",
+  "short_name": "MedTracker",
+  "description": "Self-hosted supplement & medication tracker",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#0ea5e9",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

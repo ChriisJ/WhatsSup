@@ -1,0 +1,26 @@
+# Reduce build context
+.git
+.github
+data
+docs
+*.md
+!backend/**/*.md
+node_modules
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+.DS_Store
+.idea
+.vscode
+*.log
+.env
+.env.*
+!.env.example

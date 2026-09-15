@@ -1,0 +1,26 @@
+services:
+  whatssup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: whatssup:latest
+    container_name: whatssup
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    volumes:
+      # Persist the SQLite database and any data outside the container
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Portainer-friendly labels (visible in Portainer UI)
+    labels:
+      - "com.whatssup.project=whatssup"
+      - "com.whatssup.version=0.1.0"
+      - "com.whatssup.description=Self-hosted supplement & medication tracker"
