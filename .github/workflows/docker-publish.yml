@@ -10,7 +10,11 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # Hardcode the lowercase image name. ${{ github.repository }} preserves the
+  # repo's display casing (e.g. "ChriisJ/WhatsSup") which Docker refuses on
+  # push and which GHCR resolves inconsistently for anonymous pulls, making
+  # the image unpullable from clients. Pin it explicitly.
+  IMAGE_NAME: chrisjungmann/whatssup
 
 jobs:
   build:
