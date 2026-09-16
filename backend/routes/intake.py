@@ -76,6 +76,9 @@ async def today_plan(
     end = start + timedelta(days=1)
     stmt = (
         select(IntakeLog)
+        .options(
+            selectinload(IntakeLog.user_supplement).selectinload(UserSupplement.supplement)
+        )
         .where(
             IntakeLog.user_id == current.id,
             IntakeLog.scheduled_for >= start,
@@ -84,7 +87,7 @@ async def today_plan(
         .order_by(IntakeLog.scheduled_for)
     )
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return [_build_intake_out(log) for log in result.scalars().all()]
 
 
 @router.get("/upcoming", response_model=list[IntakeOut])
@@ -98,6 +101,9 @@ async def upcoming(
     end = now + timedelta(hours=hours)
     stmt = (
         select(IntakeLog)
+        .options(
+            selectinload(IntakeLog.user_supplement).selectinload(UserSupplement.supplement)
+        )
         .where(
             IntakeLog.user_id == current.id,
             IntakeLog.scheduled_for >= now,
@@ -107,7 +113,52 @@ async def upcoming(
         .order_by(IntakeLog.scheduled_for)
     )
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return [_build_intake_out(log) for log in result.scalars().all()]
+
+
+def _build_intake_out(log: IntakeLog) -> dict:
+    """Build the IntakeOut response dict with the nested UserSupplementSlim so
+    the frontend can render the supplement name + category without a follow-up
+    API call. Assumes `log.user_supplement` and `.supplement` are eager-loaded
+    (use `selectinload` on the query)."""
+    us = log.user_supplement
+    supp = us.supplement if us else None
+    return {
+        "id": log.id,
+        "user_supplement_id": log.user_supplement_id,
+        "scheduled_for": log.scheduled_for,
+        "status": log.status,
+        "actual_taken_at": log.actual_taken_at,
+        "dose_taken": log.dose_taken,
+        "unit": log.unit,
+        "confirmed_via": log.confirmed_via,
+        "reminder_count": log.reminder_count,
+        "user_supplement": {
+            "id": us.id if us else None,
+            "supplement_id": us.supplement_id if us else None,
+            "schedule": [t.strftime("%H:%M") for t in get_schedule(us)] if us else [],
+            "custom_dose_per_kg": us.custom_dose_per_kg if us else None,
+            "custom_unit": us.custom_unit if us else None,
+            "custom_fixed_dose": us.custom_fixed_dose if us else None,
+            "supplement_name": supp.name if supp else None,
+            "supplement_category": supp.category if supp else None,
+        },
+    }
+
+
+async def _build_intake_out_full(log: IntakeLog, session: AsyncSession) -> dict:
+    """Like _build_intake_out but also fetches UserSupplement + Supplement if
+    they're not already eager-loaded. Used by confirm/skip/snooze which use
+    `session.get(IntakeLog, ...)` and don't pre-load relationships."""
+    if log.user_supplement is None:
+        us = await session.get(UserSupplement, log.user_supplement_id)
+    else:
+        us = log.user_supplement
+    supp = us.supplement if (us and us.supplement) else (
+        await session.get(Supplement, us.supplement_id) if us else None
+    )
+    log.user_supplement = us  # cache for downstream code if needed
+    return _build_intake_out(log)
 
 
 @router.post("/{intake_id}/confirm", response_model=IntakeOut)
@@ -141,7 +192,7 @@ async def confirm(
     log.confirmed_via = "web"
     await session.commit()
     await session.refresh(log)
-    return log
+    return await _build_intake_out_full(log, session)
 
 
 @router.post("/{intake_id}/skip", response_model=IntakeOut)
@@ -156,7 +207,7 @@ async def skip(
     log.status = IntakeStatus.SKIPPED
     await session.commit()
     await session.refresh(log)
-    return log
+    return await _build_intake_out_full(log, session)
 
 
 @router.post("/{intake_id}/snooze", response_model=IntakeOut)
@@ -173,4 +224,4 @@ async def snooze(
     log.status = IntakeStatus.SNOOZED
     await session.commit()
     await session.refresh(log)
-    return log
+    return await _build_intake_out_full(log, session)

@@ -151,11 +151,15 @@ async function loadToday() {
       const time = new Date(e.scheduled_for).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
       const dose = e.dose_taken ? `${e.dose_taken} ${e.unit || ""}`.trim() : "";
       const pill = `pill-${e.status}`;
+      const us = e.user_supplement || {};
+      const name = us.supplement_name || `Supplement #${e.user_supplement_id}`;
+      const cat = us.supplement_category || "";
       return `
         <div class="row-card rounded-xl p-4 flex items-center gap-3" data-intake="${e.id}">
           <div class="text-2xl font-bold tabular-nums w-14 text-center">${time}</div>
           <div class="flex-1">
-            <div class="font-semibold">Supplement #${e.user_supplement_id}</div>
+            <div class="font-semibold">${name}</div>
+            ${cat ? `<div class="text-xs text-slate-500 uppercase">${cat}</div>` : ""}
             ${dose ? `<div class="text-sm text-slate-400">${dose}</div>` : ""}
           </div>
           <span class="pill ${pill}">${e.status}</span>
@@ -264,11 +268,16 @@ async function openAddSuppModal() {
       <input id="mFixed" type="number" step="0.01"
              class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
     </label>
-    <label class="block">
-      <span class="text-sm text-slate-400">Einnahmezeiten (HH:MM, mehrere mit Komma)</span>
-      <input id="mSchedule" type="text" placeholder="08:00, 20:00"
-             class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
-    </label>
+    <div class="block">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-sm text-slate-400">Einnahmezeiten</span>
+        <button id="mAddTime" type="button"
+                class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200">
+          + Uhrzeit
+        </button>
+      </div>
+      <div id="mSchedule" class="space-y-2"></div>
+    </div>
     <label class="block">
       <span class="text-sm text-slate-400">Notizen</span>
       <textarea id="mNotes" rows="2"
@@ -277,9 +286,30 @@ async function openAddSuppModal() {
     <button id="mSave" class="w-full py-2 rounded-lg bg-brand-500 hover:bg-brand-600 font-semibold">Speichern</button>
   `;
   $("#modal").classList.remove("hidden");
+
+  // Add one empty time slot to start
+  const addTimeSlot = (value = "08:00") => {
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-2";
+    row.innerHTML = `
+      <input type="time" value="${value}"
+             class="m-time flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700
+                    focus:outline-none focus:ring-2 focus:ring-brand-500" />
+      <button type="button" class="m-time-rm text-slate-400 hover:text-rose-400 px-2 py-1">✕</button>
+    `;
+    row.querySelector(".m-time-rm").addEventListener("click", () => {
+      if ($("#mSchedule").children.length > 1) row.remove();
+      else toast("Mindestens eine Uhrzeit nötig (oder leer = keine Reminder)", "warn");
+    });
+    $("#mSchedule").appendChild(row);
+  };
+  addTimeSlot();
+  $("#mAddTime").addEventListener("click", () => addTimeSlot());
+
   $("#mSave").addEventListener("click", async () => {
-    const scheduleRaw = $("#mSchedule").value;
-    const schedule = scheduleRaw.split(",").map(s => s.trim()).filter(Boolean);
+    const schedule = $$("#mSchedule .m-time")
+      .map(i => i.value)
+      .filter(v => /^\d{2}:\d{2}$/.test(v));
     try {
       await api.post("/my-supplements", {
         supplement_id: parseInt($("#mSupp").value, 10),
@@ -324,6 +354,122 @@ async function loadCatalog() {
 }
 $("#catalogSearch").addEventListener("input", debounce(loadCatalog, 250));
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+$("#addCatalogBtn").addEventListener("click", () => openCreateCatalogModal());
+
+function openCreateCatalogModal() {
+  $("#modalTitle").textContent = "Neues Supplement im Katalog";
+  $("#modalBody").innerHTML = `
+    <p class="text-sm text-slate-400">
+      Lege ein neues Supplement im globalen Katalog an. Steht danach allen Usern zur Verfügung.
+    </p>
+    <label class="block">
+      <span class="text-sm text-slate-400">Name *</span>
+      <input id="cName" type="text" required placeholder="z.B. Ashwagandha KSM-66"
+             class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
+    </label>
+    <label class="block">
+      <span class="text-sm text-slate-400">Slug (URL-Identifier, nur Kleinbuchstaben + Bindestriche) *</span>
+      <input id="cSlug" type="text" required placeholder="ashwagandha-ksm-66"
+             pattern="[a-z0-9]+(-[a-z0-9]+)*"
+             class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
+    </label>
+    <div class="grid sm:grid-cols-2 gap-3">
+      <label class="block">
+        <span class="text-sm text-slate-400">Kategorie</span>
+        <select id="cCategory" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
+          <option value="vitamin">Vitamin</option>
+          <option value="mineral">Mineral</option>
+          <option value="amino">Aminosäure</option>
+          <option value="nootropic">Nootropikum</option>
+          <option value="adaptogen">Adaptogen</option>
+          <option value="omega">Omega-Fettsäure</option>
+          <option value="herb">Kräuter</option>
+          <option value="other" selected>Andere</option>
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-sm text-slate-400">Standard-Einheit</span>
+        <select id="cUnit" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
+          <option value="mg">mg</option>
+          <option value="g">g</option>
+          <option value="mcg">mcg</option>
+          <option value="IU">IU</option>
+          <option value="ml">ml</option>
+          <option value="cup">Tasse</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid sm:grid-cols-2 gap-3">
+      <label class="block">
+        <span class="text-sm text-slate-400">Dosis pro kg (optional)</span>
+        <input id="cDosePerKg" type="number" step="0.001" min="0"
+               class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
+      </label>
+      <label class="block">
+        <span class="text-sm text-slate-400">Halbwertszeit (h, optional)</span>
+        <input id="cHalfLife" type="number" step="0.1" min="0"
+               class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" />
+      </label>
+    </div>
+    <div class="grid sm:grid-cols-2 gap-3">
+      <label class="flex items-center gap-2 text-sm">
+        <input id="cWithFood" type="checkbox" class="accent-brand-500" />
+        Mit Mahlzeit einnehmen
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input id="cEmptyStomach" type="checkbox" class="accent-brand-500" />
+        Auf nüchternen Magen
+      </label>
+    </div>
+    <label class="block">
+      <span class="text-sm text-slate-400">Notizen</span>
+      <textarea id="cNotes" rows="2"
+                class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700"></textarea>
+    </label>
+    <button id="cSave" class="w-full py-2 rounded-lg bg-brand-500 hover:bg-brand-600 font-semibold">Anlegen</button>
+  `;
+  $("#modal").classList.remove("hidden");
+
+  // Auto-fill slug from name (until user edits slug manually)
+  const nameEl = $("#cName"), slugEl = $("#cSlug");
+  let slugTouched = false;
+  slugEl.addEventListener("input", () => { slugTouched = true; });
+  nameEl.addEventListener("input", () => {
+    if (!slugTouched) {
+      slugEl.value = nameEl.value
+        .toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")  // strip diacritics
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    }
+  });
+
+  $("#cSave").addEventListener("click", async () => {
+    const name = $("#cName").value.trim();
+    const slug = $("#cSlug").value.trim();
+    if (!name || !slug) {
+      toast("Name und Slug sind Pflichtfelder", "err");
+      return;
+    }
+    try {
+      await api.post("/supplements", {
+        name,
+        slug,
+        category: $("#cCategory").value,
+        default_unit: $("#cUnit").value,
+        default_dose_per_kg: $("#cDosePerKg").value ? parseFloat($("#cDosePerKg").value) : null,
+        half_life_hours: $("#cHalfLife").value ? parseFloat($("#cHalfLife").value) : null,
+        best_taken_with_food: $("#cWithFood").checked,
+        best_taken_empty_stomach: $("#cEmptyStomach").checked,
+        notes: $("#cNotes").value || null,
+      });
+      toast("Angelegt");
+      $("#modal").classList.add("hidden");
+      loadCatalog();
+    } catch (e) { toast(e.message, "err"); }
+  });
+}
 
 // ---- Blood pressure ----
 async function loadBP() {

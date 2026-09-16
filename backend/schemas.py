@@ -108,6 +108,10 @@ class IntakeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     user_supplement_id: int
+    # Nested so the frontend can render the supplement name + dose without
+    # an extra round-trip per intake. The route eagerly loads it via
+    # selectinload(IntakeLog.user_supplement).selectinload(UserSupplement.supplement).
+    user_supplement: "UserSupplementSlim"
     scheduled_for: datetime
     status: IntakeStatus
     actual_taken_at: Optional[datetime]
@@ -115,6 +119,20 @@ class IntakeOut(BaseModel):
     unit: Optional[str]
     confirmed_via: Optional[str]
     reminder_count: int
+
+
+class UserSupplementSlim(BaseModel):
+    """Subset of UserSupplementOut returned inside IntakeOut - no need for
+    the heavy nested Supplement just for display."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    supplement_id: int
+    schedule: list[str] = []
+    custom_dose_per_kg: Optional[float] = None
+    custom_unit: Optional[str] = None
+    custom_fixed_dose: Optional[float] = None
+    supplement_name: Optional[str] = None
+    supplement_category: Optional[str] = None
 
 
 # ---- Blood pressure ----
