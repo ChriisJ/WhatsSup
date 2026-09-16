@@ -19,7 +19,7 @@ class Base(DeclarativeBase):
 
 _settings = get_settings()
 
-# Convert sqlite:///./data/medtracker.db to sqlite+aiosqlite:///./data/medtracker.db
+# Convert sqlite:///./data/whatssup.db to sqlite+aiosqlite:///./data/whatssup.db
 _db_url = _settings.database_url
 if _db_url.startswith("sqlite:///"):
     _db_url = _db_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)

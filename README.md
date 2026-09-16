@@ -1,4 +1,4 @@
-# 💊 MedTracker
+# 💊 WhatsSup
 
 Self-hosted supplement & medication tracker with smart reminders.
 **No ads. No subscription. Your data stays on your machine.**
@@ -28,8 +28,8 @@ The default port is `8000`. Open `http://your-host:8000` and log in with the cre
 ### Option B: Local Docker Compose
 
 ```bash
-git clone https://github.com/your-name/medtracker.git
-cd medtracker
+git clone https://github.com/ChriisJ/whatssup.git
+cd whatssup
 cp .env.example .env
 # Edit .env — set SECRET_KEY and DEFAULT_ADMIN_PASSWORD at minimum
 docker compose up -d
@@ -39,14 +39,14 @@ The image is automatically published to GitHub Container Registry on every push 
 and tagged `latest`. Pull with:
 
 ```bash
-docker pull ghcr.io/your-name/medtracker:latest
+docker pull ghcr.io/ChriisJ/whatssup:latest
 ```
 
 ### Option C: Plain Python (for hacking on it)
 
 ```bash
-git clone https://github.com/your-name/medtracker.git
-cd medtracker
+git clone https://github.com/ChriisJ/whatssup.git
+cd whatssup
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 cp .env.example .env
@@ -123,7 +123,7 @@ Built-in curated list. Add more via the database. Detected automatically on the 
 ## 📁 Project structure
 
 ```
-medtracker/
+whatssup/
 ├── backend/             # FastAPI app
 │   ├── main.py          # Entry point + wiring
 │   ├── config.py
@@ -173,7 +173,7 @@ PRs welcome — see [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md).
 
 ## ⚠️ Disclaimer
 
-MedTracker is not a medical device. The interaction database and dosage suggestions are
+WhatsSup is not a medical device. The interaction database and dosage suggestions are
 **heuristic and not a substitute for medical advice**. Always consult a doctor or pharmacist
 before changing supplements, especially if you take prescription medication.
 

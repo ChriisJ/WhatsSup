@@ -1,5 +1,5 @@
 // Minimal service worker - network-first for API, cache-first for static
-const CACHE = "medtracker-v1";
+const CACHE = "whatssup-v1";
 const STATIC_ASSETS = ["/", "/static/styles.css", "/static/app.js", "/manifest.json", "/static/icon.svg"];
 
 self.addEventListener("install", (e) => {

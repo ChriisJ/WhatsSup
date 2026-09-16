@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
 
     # Database
-    database_url: str = "sqlite:///./data/medtracker.db"
+    database_url: str = "sqlite:///./data/whatssup.db"
 
     # Auth
     default_admin_username: str = "admin"

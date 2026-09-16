@@ -66,7 +66,7 @@ class TelegramNotifier(Notifier):
 
     async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "Hi! Ich bin dein MedTracker-Bot. Ich schicke dir Erinnerungen für deine Supplements.\n"
+            "Hi! Ich bin dein WhatsSup-Bot. Ich schicke dir Erinnerungen für deine Supplements.\n"
             "Befehle: /today, /list"
         )
 
@@ -127,16 +127,26 @@ class TelegramNotifier(Notifier):
         if not self._app:
             return None
         s = get_settings()
-        target_chat: Optional[int] = None
-        if s.telegram_allowed_chat_set:
+
+        # Resolve the target chat(s). We broadcast to every chat in the
+        # allow-list - that's how a shared family bot works. If the list is
+        # empty we fall back to the last chat that interacted with the bot
+        # (so an empty config still works for a single-user ad-hoc deploy).
+        targets: list[int] = []
+        for raw in s.telegram_allowed_chat_set:
             try:
-                target_chat = int(next(iter(s.telegram_allowed_chat_set)))
-            except Exception:
-                target_chat = None
-        if target_chat is None and self._last_chat_by_intake:
-            # No explicit config - we don't know where to send. Skip.
-            return None
-        if target_chat is None:
+                targets.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        if not targets and self._last_chat_by_intake:
+            # No explicit config but someone has used the bot before - reuse.
+            targets = [self._last_chat_by_intake[payload.intake_id]]
+
+        if not targets:
+            logger.warning(
+                "Telegram enabled but no chat configured and no prior "
+                "interaction; have the user send /start to your bot first."
+            )
             return None
 
         dose = f"_{payload.dose} {payload.unit}_" if payload.dose else ""
@@ -145,11 +155,21 @@ class TelegramNotifier(Notifier):
             f"*{payload.supplement_name}* {dose}\n"
             f"⏰ Geplant: {payload.scheduled_for.strftime('%H:%M')}"
         )
-        msg = await self._app.bot.send_message(
-            chat_id=target_chat,
-            text=text,
-            reply_markup=_keyboard(payload.intake_id),
-            parse_mode="Markdown",
-        )
-        self._last_chat_by_intake[payload.intake_id] = target_chat
-        return str(msg.message_id)
+
+        sent_ids: list[str] = []
+        for chat_id in targets:
+            try:
+                msg = await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=_keyboard(payload.intake_id),
+                    parse_mode="Markdown",
+                )
+                sent_ids.append(str(msg.message_id))
+                self._last_chat_by_intake[payload.intake_id] = chat_id
+            except Exception as e:
+                logger.warning(
+                    "Telegram send failed for chat=%s intake=%s: %s",
+                    chat_id, payload.intake_id, e,
+                )
+        return ",".join(sent_ids) if sent_ids else None
