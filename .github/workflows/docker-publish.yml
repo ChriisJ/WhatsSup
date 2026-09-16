@@ -10,7 +10,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # Hardcode the lowercase name. ${{ github.repository }} preserves the
+  # repo's casing (e.g. "ChriisJ/WhatsSup") which Docker refuses and GHCR
+  # resolves inconsistently - the image becomes unpullable from clients.
+  IMAGE_NAME: chrisjungmann/whatssup
 
 jobs:
   build:
