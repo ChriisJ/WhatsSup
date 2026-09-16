@@ -1,4 +1,4 @@
-"""SQLAlchemy models for MedTracker."""
+"""SQLAlchemy models for WhatsSup."""
 from __future__ import annotations
 
 import enum
@@ -148,6 +148,11 @@ class IntakeLog(Base):
     confirmed_via: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     # Number of reminder pushes sent so far (for 30-min loop)
     reminder_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Timestamp of the most recent reminder push. Drives the scheduler's
+    # throttle: a new reminder is sent only if ``now - last_reminded_at``
+    # exceeds the configured interval, regardless of how many pushes were
+    # skipped (e.g. quiet hours, bot downtime). Nullable until first push.
+    last_reminded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

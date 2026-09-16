@@ -8,11 +8,40 @@ services:
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8000}:8000"
-    env_file:
-      - .env
+    # All config via inline `environment` block. Using `env_file: - .env` here
+    # is a trap when deployed via Portainer's Git-repo build: Portainer runs
+    # docker compose from /data/compose/<stack-id>/ and there is no .env file
+    # at that path. Inline env vars + the Portainer UI env-block are the
+    # portable solution.
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-8000}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/whatssup.db}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-admin}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:?DEFAULT_ADMIN_PASSWORD must be set}
+      REMINDER_INTERVAL_MINUTES: ${REMINDER_INTERVAL_MINUTES:-30}
+      REMINDER_QUIET_HOURS_START: ${REMINDER_QUIET_HOURS_START:-22}
+      REMINDER_QUIET_HOURS_END: ${REMINDER_QUIET_HOURS_END:-7}
+      # Discord (optional)
+      DISCORD_ENABLED: ${DISCORD_ENABLED:-false}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID:-}
+      DISCORD_ALLOWED_USERS: ${DISCORD_ALLOWED_USERS:-}
+      # Telegram (optional)
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_CHATS: ${TELEGRAM_ALLOWED_CHATS:-}
+      # WhatsApp via CallMeBot (optional)
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_PHONE: ${WHATSAPP_PHONE:-}
+      WHATSAPP_APIKEY: ${WHATSAPP_APIKEY:-}
+    # Named volume (not host bind) so the path works the same on a bare
+    # `docker compose up` and on Portainer's /data/compose/<stack-id>/ cwd.
     volumes:
-      # Persist the SQLite database and any data outside the container
-      - ./data:/app/data
+      - whatssup-data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
       interval: 30s
@@ -24,3 +53,6 @@ services:
       - "com.whatssup.project=whatssup"
       - "com.whatssup.version=0.1.0"
       - "com.whatssup.description=Self-hosted supplement & medication tracker"
+
+volumes:
+  whatssup-data:

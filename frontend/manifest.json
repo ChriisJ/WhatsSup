@@ -1,6 +1,6 @@
 {
-  "name": "MedTracker",
-  "short_name": "MedTracker",
+  "name": "WhatsSup",
+  "short_name": "WhatsSup",
   "description": "Self-hosted supplement & medication tracker",
   "start_url": "/",
   "display": "standalone",

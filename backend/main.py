@@ -1,4 +1,4 @@
-"""FastAPI entrypoint for MedTracker."""
+"""FastAPI entrypoint for WhatsSup."""
 from __future__ import annotations
 
 import logging
@@ -23,7 +23,7 @@ from .scheduler import start_scheduler
 from .seed_catalog import ensure_seed_catalog
 from .security import hash_password
 
-logger = logging.getLogger("medtracker")
+logger = logging.getLogger("whatssup")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="MedTracker",
+    title="WhatsSup",
     description="Self-hosted supplement & medication tracker with smart reminders.",
     version="0.1.0",
     lifespan=lifespan,
@@ -169,7 +169,7 @@ else:
     @app.get("/")
     async def root_no_frontend():
         return {
-            "name": "MedTracker API",
+            "name": "WhatsSup API",
             "note": "Frontend not built yet. Visit /docs for Swagger UI.",
         }
 

@@ -1,6 +1,6 @@
 """APScheduler job: every minute, find PENDING intakes whose scheduled_for
-is in the past (or now) and haven't been confirmed -> send a reminder,
-increment reminder_count, and schedule the next check 30 minutes later.
+is in the past and haven't been confirmed -> send a reminder and update
+``last_reminded_at`` for throttling.
 
 This implements the "alle 30 Minuten eine Erinnerung, bis ich es aktiv abharke"
 requirement without needing one job per intake.
@@ -28,6 +28,12 @@ from .notifiers import NotifierManager, ReminderPayload
 logger = logging.getLogger(__name__)
 
 
+# Hard cap on how many reminders we'll send for a single PENDING intake.
+# Default: 6 reminders * 30min = 3h, after which we stop pestering (the 6h
+# auto-MISSED cutoff below still applies).
+_MAX_REMINDERS = 6
+
+
 def _in_quiet_hours(now: datetime) -> bool:
     s = get_settings()
     start = s.reminder_quiet_hours_start
@@ -43,18 +49,21 @@ async def reminder_tick(
     session_maker,
     notifiers: NotifierManager,
 ) -> None:
-    """Runs every minute. Sends reminders for past-due PENDING intakes
-    that are due (and outside quiet hours unless already >30min overdue)."""
-    if _in_quiet_hours(datetime.now()):
-        # Allow overdue items to still nudge, but don't pester lightly-overdue ones
-        pass
+    """Runs every minute. Sends reminders for past-due PENDING intakes.
 
+    Throttling: a reminder is sent only if either no reminder has been sent
+    yet, or the last one was sent at least ``reminder_interval_minutes``
+    ago. A hard cap of ``_MAX_REMINDERS`` prevents infinite spam.
+
+    Quiet hours: suppress reminders for items that are only slightly overdue
+    (< interval); already-overdue items still get a nudge so morning
+    supplements queued during the night are seen at 07:00 sharp.
+    """
     s = get_settings()
     interval = s.reminder_interval_minutes
-
     now = datetime.now()
-    window_start = now - timedelta(minutes=interval)  # only remind if scheduled before this
-    cutoff_max_stale = now - timedelta(hours=4)  # nothing older than 4h gets reminders
+    cutoff_max_stale = now - timedelta(hours=4)  # don't remind anything older than 4h
+    quiet = _in_quiet_hours(now)
 
     async with session_maker() as session:
         stmt = (
@@ -68,6 +77,7 @@ async def reminder_tick(
                 IntakeLog.status == IntakeStatus.PENDING,
                 IntakeLog.scheduled_for <= now,
                 IntakeLog.scheduled_for >= cutoff_max_stale,
+                IntakeLog.reminder_count < _MAX_REMINDERS,
             )
         )
         result = await session.execute(stmt)
@@ -79,20 +89,25 @@ async def reminder_tick(
             if not us or not supp:
                 continue
 
-            # Throttle: only remind if last reminder >= interval minutes ago OR never
-            last_sent = log.scheduled_for + timedelta(minutes=log.reminder_count * interval)
-            if last_sent > now - timedelta(seconds=interval * 60 - 60):
-                # We sent one less than `interval` minutes ago
-                continue
-
-            # Quiet hours check
-            if _in_quiet_hours(now) and now - log.scheduled_for < timedelta(minutes=interval):
-                continue
+            # Throttle against the actual timestamp of the last reminder.
+            if log.last_reminded_at is not None:
+                elapsed = now - log.last_reminded_at
+                if elapsed < timedelta(minutes=interval):
+                    # Already reminded within this window; skip.
+                    continue
+            else:
+                # Never reminded. Suppress during quiet hours unless it's
+                # already overdue by more than the interval (i.e. it was
+                # due during the previous quiet period).
+                if quiet and now - log.scheduled_for < timedelta(minutes=interval):
+                    continue
 
             user = log.user
             profile = await session.get(UserProfile, user.id)
-            dose, unit = compute_recommended_dose(us, supp, profile)
+            if not profile:
+                profile = UserProfile(user_id=user.id)
 
+            dose, unit = compute_recommended_dose(us, supp, profile)
             payload = ReminderPayload(
                 intake_id=log.id,
                 supplement_name=supp.name,
@@ -103,8 +118,6 @@ async def reminder_tick(
             )
 
             # Decide which channels to send to
-            if not profile:
-                profile = UserProfile(user_id=user.id)
             channels: list[str] = []
             if profile.notify_web:
                 channels.append("web")
@@ -116,13 +129,15 @@ async def reminder_tick(
                 channels.append("whatsapp")
 
             await notifiers.broadcast_reminder(user.id, payload)
+            log.last_reminded_at = now
             log.reminder_count += 1
             logger.info(
-                "Reminded user=%s supplement=%s channels=%s count=%s",
-                user.username, supp.name, channels, log.reminder_count,
+                "Reminded user=%s supplement=%s channels=%s count=%s/%s",
+                user.username, supp.name, channels, log.reminder_count, _MAX_REMINDERS,
             )
 
-        # Mark stale PENDING as MISSED
+        # Mark very stale PENDING as MISSED (still 6h cutoff - gives the
+        # _MAX_REMINDERS cap room to be the first line of defence).
         miss_cutoff = now - timedelta(hours=6)
         stale = await session.execute(
             select(IntakeLog).where(

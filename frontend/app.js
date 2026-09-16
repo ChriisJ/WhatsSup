@@ -1,9 +1,9 @@
-// MedTracker frontend - vanilla JS, no build step.
+// WhatsSup frontend - vanilla JS, no build step.
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const TOKEN_KEY = "medtracker_token";
-const USER_KEY  = "medtracker_user";
+const TOKEN_KEY = "whatssup_token";
+const USER_KEY  = "whatssup_user";
 
 // ---- API helper ----
 const api = {

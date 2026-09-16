@@ -9,7 +9,11 @@ alembic==1.13.3
 aiosqlite==0.20.0
 
 # Auth & security
+# passlib 1.7.4 (last release 2020) is incompatible with bcrypt >= 4.x: the
+# internal "detect_wrap_bug" probe trips the new bcrypt length-validation
+# check and crashes the admin-bootstrap path on first run. Pin bcrypt < 4.
 passlib[bcrypt]==1.7.4
+bcrypt<4.0
 python-jose[cryptography]==3.3.0
 
 # Validation & utils

@@ -5,8 +5,8 @@ Detailed setup walkthrough.
 ## 1. Clone and configure
 
 ```bash
-git clone https://github.com/your-name/medtracker.git
-cd medtracker
+git clone https://github.com/ChriisJ/whatssup.git
+cd whatssup
 cp .env.example .env
 ```
 
@@ -69,7 +69,7 @@ See `.env.example` for the steps. Long story short: save the number, send a mess
 
 ```bash
 docker compose up -d
-docker compose logs -f medtracker
+docker compose logs -f whatssup
 ```
 
 ### Via Portainer
@@ -86,7 +86,7 @@ to GitHub Container Registry on every push to `main` with the `latest` tag, plus
 
 To use with **Portainer + Watchtower**:
 1. Deploy as above.
-2. Add a separate **Watchtower** stack pointing at the `medtracker` container.
+2. Add a separate **Watchtower** stack pointing at the `whatssup` container.
 
 ## 6. First login
 

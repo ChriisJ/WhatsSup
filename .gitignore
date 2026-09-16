@@ -59,3 +59,12 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Local dev helper scripts (download/rename/bootstrap)
+.download-files.ps1
+.rename.ps1
+.bootstrap.ps1
+
+# Local dev helpers (one-off fixes)
+.fix-utf8.py
+.fix-*
