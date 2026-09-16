@@ -45,6 +45,8 @@ function applyAuth() {
     $("#loginScreen").classList.add("hidden");
     const u = JSON.parse(localStorage.getItem(USER_KEY) || "{}");
     $("#userBadge").textContent = `👤 ${u.username || ""}`;
+    // Admin tab only visible to admin users
+    $("#tabAdminBtn").classList.toggle("hidden", !u.is_admin);
   } else {
     $("#app").classList.add("hidden");
     $("#loginScreen").classList.remove("hidden");
@@ -96,6 +98,7 @@ function switchTab(name) {
   if (name === "bp")       loadBP();
   if (name === "stats")    loadStats();
   if (name === "profile")  loadProfile();
+  if (name === "admin")    loadAdmin();
 }
 $$(".tab").forEach(t => t.addEventListener("click", () => switchTab(t.dataset.tab)));
 
@@ -571,6 +574,199 @@ $("#profileForm").addEventListener("submit", async (e) => {
     toast("Gespeichert");
   } catch (e) { toast(e.message, "err"); }
 });
+
+// ---- Admin: bot configuration ----
+const BOT_DEFS = {
+  discord: {
+    label: "Discord",
+    icon: "🎮",
+    color: "indigo",
+    desc: "Bot-Token, Channel-ID und optional erlaubte User-IDs für Inline-Buttons.",
+    fields: [
+      { id: "bot_token",   label: "Bot-Token",           type: "password", placeholder: "aus Discord Developer Portal" },
+      { id: "channel_id",  label: "Channel-ID (optional)",type: "text",     placeholder: "leer = DM an User" },
+      { id: "guild_id",    label: "Guild-ID (optional)",  type: "text",     placeholder: "nur für Diagnose" },
+      { id: "allowed_users",label: "Erlaubte User-IDs",   type: "text",     placeholder: "Komma-getrennt; leer = alle im Channel" },
+    ],
+  },
+  telegram: {
+    label: "Telegram",
+    icon: "✈️",
+    color: "sky",
+    desc: "Bot-Token (BotFather) und Chat-IDs, an die Reminder gehen.",
+    fields: [
+      { id: "bot_token",     label: "Bot-Token",           type: "password", placeholder: "von @BotFather" },
+      { id: "allowed_chats", label: "Erlaubte Chat-IDs",   type: "text",     placeholder: "Komma-getrennt; leer = broadcast an alle konfigurierten" },
+    ],
+  },
+  whatsapp: {
+    label: "WhatsApp (CallMeBot)",
+    icon: "📱",
+    color: "emerald",
+    desc: "Plain-Text-Erinnerungen via CallMeBot-Gateway. Keine Buttons.",
+    fields: [
+      { id: "phone",  label: "Telefonnummer (mit Ländervorwahl)", type: "text", placeholder: "z.B. 491701234567" },
+      { id: "apikey", label: "CallMeBot API-Key",                 type: "password", placeholder: "per WhatsApp von CallMeBot zugeschickt" },
+    ],
+  },
+};
+
+function statusDot(status) {
+  const colors = {
+    running: "bg-emerald-400",
+    stopped: "bg-slate-500",
+    error:   "bg-rose-500",
+    unknown: "bg-amber-400",
+  };
+  const label = {
+    running: "läuft",
+    stopped: "gestoppt",
+    error:   "Fehler",
+    unknown: "unbekannt",
+  };
+  return `<span class="inline-flex items-center gap-1.5 text-xs">
+    <span class="inline-block w-2 h-2 rounded-full ${colors[status] || "bg-slate-500"}"></span>
+    ${label[status] || status}
+  </span>`;
+}
+
+async function loadAdmin() {
+  const box = $("#adminBots");
+  box.innerHTML = `<div class="text-slate-500 text-sm">Lädt…</div>`;
+  const bots = await Promise.all(
+    Object.keys(BOT_DEFS).map(name => api.get(`/admin/bots/${name}`).catch(e => ({ name, error: e.message })))
+  );
+  box.innerHTML = bots.map(b => renderBotCard(b)).join("");
+  // Wire buttons
+  Object.keys(BOT_DEFS).forEach(name => {
+    const card = box.querySelector(`[data-bot="${name}"]`);
+    if (!card) return;
+    card.querySelector(".a-save")?.addEventListener("click", () => saveBot(name));
+    card.querySelector(".a-restart")?.addEventListener("click", () => restartBot(name));
+    card.querySelector(".a-reset")?.addEventListener("click", () => resetBot(name));
+    card.querySelector(".a-enabled")?.addEventListener("change", e => {
+      card.querySelector(".a-fields").classList.toggle("opacity-50", !e.target.checked);
+    });
+    // Initial opacity state
+    const en = card.querySelector(".a-enabled");
+    if (en && !en.checked) card.querySelector(".a-fields").classList.add("opacity-50");
+  });
+}
+
+function renderBotCard(b) {
+  const def = BOT_DEFS[b.name];
+  if (!def) return "";
+  if (b.error) {
+    return `<div class="row-card rounded-xl p-4">
+      <div class="font-semibold">${def.label}</div>
+      <div class="text-rose-400 text-sm">${b.error}</div>
+    </div>`;
+  }
+  const statusLine = b.runtime_message
+    ? `<span class="text-xs text-rose-400 ml-2">${b.runtime_message}</span>`
+    : "";
+  const source = b.is_db_override
+    ? `<span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">aus DB</span>`
+    : `<span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">aus .env</span>`;
+  const enabled = !!b.enabled;
+  const fields = def.fields.map(f => `
+    <label class="block">
+      <span class="text-xs text-slate-400">${f.label}</span>
+      <input data-field="${f.id}" type="${f.type}" value="${(b[f.id] || "").replace(/"/g, "&quot;")}"
+             placeholder="${f.placeholder || ""}"
+             class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700
+                    focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-sm" />
+    </label>
+  `).join("");
+
+  return `
+    <div class="row-card rounded-xl p-4 space-y-3" data-bot="${b.name}">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">${def.icon}</span>
+          <span class="font-semibold">${def.label}</span>
+          ${source}
+          <span class="ml-2">${statusDot(b.runtime_status)}</span>${statusLine}
+        </div>
+        <label class="flex items-center gap-2 text-sm">
+          <span class="text-slate-400">Aktiv</span>
+          <input type="checkbox" class="a-enabled accent-brand-500" ${enabled ? "checked" : ""} />
+        </label>
+      </div>
+      <p class="text-xs text-slate-400">${def.desc}</p>
+      <div class="a-fields space-y-3">${fields}</div>
+      <div class="flex flex-wrap gap-2 pt-2">
+        <button class="a-save px-3 py-1.5 bg-brand-500 hover:bg-brand-600 rounded-lg text-sm font-semibold">Speichern & neu starten</button>
+        <button class="a-restart px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">Neu starten</button>
+        ${b.is_db_override ? `<button class="a-reset px-3 py-1.5 text-rose-400 hover:bg-rose-500/20 rounded-lg text-sm">DB-Werte löschen (.env nutzen)</button>` : ""}
+      </div>
+      ${b.updated_at ? `<div class="text-xs text-slate-500">Zuletzt geändert: ${new Date(b.updated_at).toLocaleString("de-DE")}</div>` : ""}
+    </div>
+  `;
+}
+
+async function saveBot(name) {
+  const card = $(`[data-bot="${name}"]`);
+  if (!card) return;
+  const body = {
+    enabled: card.querySelector(".a-enabled").checked,
+    bot_token:    card.querySelector('[data-field="bot_token"]')?.value || null,
+    channel_id:   card.querySelector('[data-field="channel_id"]')?.value || null,
+    guild_id:     card.querySelector('[data-field="guild_id"]')?.value || null,
+    allowed_users:card.querySelector('[data-field="allowed_users"]')?.value || null,
+    allowed_chats:card.querySelector('[data-field="allowed_chats"]')?.value || null,
+    phone:        card.querySelector('[data-field="phone"]')?.value || null,
+    apikey:       card.querySelector('[data-field="apikey"]')?.value || null,
+  };
+  // Strip nulls to defaults - route ignores null vs empty anyway
+  try {
+    const updated = await api.put(`/admin/bots/${name}`, body);
+    toast(`Bot ${name} aktualisiert`, "ok");
+    renderBotInPlace(updated);
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+async function restartBot(name) {
+  try {
+    const updated = await api.post(`/admin/bots/${name}/restart`);
+    toast(`Bot ${name} neu gestartet`, "ok");
+    renderBotInPlace(updated);
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+async function resetBot(name) {
+  if (!confirm(`DB-Überschreibung für ${name} löschen? Der Bot nutzt dann wieder die .env-Werte.`)) return;
+  try {
+    const updated = await api.del(`/admin/bots/${name}`);
+    toast(`Bot ${name} zurückgesetzt`, "ok");
+    renderBotInPlace(updated);
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+function renderBotInPlace(b) {
+  const card = $(`[data-bot="${b.name}"]`);
+  if (!card) return;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = renderBotCard(b);
+  const fresh = tmp.firstElementChild;
+  card.replaceWith(fresh);
+  // Re-wire buttons
+  fresh.querySelector(".a-save")?.addEventListener("click", () => saveBot(b.name));
+  fresh.querySelector(".a-restart")?.addEventListener("click", () => restartBot(b.name));
+  fresh.querySelector(".a-reset")?.addEventListener("click", () => resetBot(b.name));
+  fresh.querySelector(".a-enabled")?.addEventListener("change", e => {
+    fresh.querySelector(".a-fields").classList.toggle("opacity-50", !e.target.checked);
+  });
+  const en = fresh.querySelector(".a-enabled");
+  if (en && !en.checked) fresh.querySelector(".a-fields").classList.add("opacity-50");
+}
+
 
 // ---- Boot ----
 function loadAll() { loadToday(); }

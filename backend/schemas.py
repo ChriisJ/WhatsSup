@@ -172,3 +172,37 @@ class InteractionOut(BaseModel):
     severity: str
     description: str
     recommendation: str
+
+
+# ---- Admin / Bot config ----
+class BotConfigIn(BaseModel):
+    """What the admin submits from the web UI. All fields optional except `enabled`.
+    Empty string means 'clear this value'; the route distinguishes from 'leave default'."""
+    enabled: bool
+    bot_token: Optional[str] = None
+    channel_id: Optional[str] = None
+    guild_id: Optional[str] = None
+    allowed_users: Optional[str] = None  # comma-separated Discord user IDs
+    allowed_chats: Optional[str] = None  # comma-separated Telegram chat IDs
+    phone: Optional[str] = None
+    apikey: Optional[str] = None
+
+
+class BotConfigOut(BaseModel):
+    """Effective bot config + runtime status. `secret_token` is masked."""
+    model_config = ConfigDict(from_attributes=True)
+    name: str
+    enabled: bool
+    bot_token: Optional[str] = None
+    channel_id: Optional[str] = None
+    guild_id: Optional[str] = None
+    allowed_users: Optional[str] = None
+    allowed_chats: Optional[str] = None
+    phone: Optional[str] = None
+    apikey: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    # Runtime status, filled in by the route (not a DB column).
+    runtime_status: str = "unknown"        # 'running' | 'stopped' | 'error'
+    runtime_message: Optional[str] = None   # last error message, if any
+    # True if the displayed values come from the DB row vs env-var defaults.
+    is_db_override: bool = False

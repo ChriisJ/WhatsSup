@@ -13,12 +13,13 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from .bot_bridge import bot_action
+from .bot_config import get_effective_config
 from .config import get_settings
 from .database import AsyncSessionLocal, init_db
 from .interactions import ensure_seed_rules
 from .models import User, UserProfile
 from .notifiers import NotifierManager
-from .routes import auth, blood_pressure, intake, profile, stats, supplements
+from .routes import admin, auth, blood_pressure, intake, profile, stats, supplements
 from .scheduler import start_scheduler
 from .seed_catalog import ensure_seed_catalog
 from .security import hash_password
@@ -114,6 +115,7 @@ app.include_router(supplements.tracking_router)
 app.include_router(intake.router)
 app.include_router(blood_pressure.router)
 app.include_router(stats.router)
+app.include_router(admin.router)
 
 
 @app.get("/api/health")

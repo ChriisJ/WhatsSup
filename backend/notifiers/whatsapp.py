@@ -1,69 +1,72 @@
-"""WhatsApp via CallMeBot (free, unofficial, no buttons).
+"""WhatsApp notifier via CallMeBot (free, unofficial, plain-text only).
 
-CallMeBot only supports plain-text messages. Confirmation via WhatsApp is
-*not* available with this provider. Users must reply via the web UI.
+CallMeBot is a third-party HTTP gateway that forwards text messages to a
+WhatsApp number. No buttons, no per-intake tracking \u2014 the user confirms
+intakes in the web UI or by replying via another channel.
 
-Set up:
-  1. Save +34 644 59 71 47 in contacts as "CallMeBot".
-  2. Send:  I allow callmebot to send me messages
-  3. You'll receive an apikey; put it in WHATSAPP_APIKEY.
-  4. Put your phone (international format, no +) in WHATSAPP_PHONE.
+Config (phone, apikey, enable flag) is loaded from the DB if an admin has
+set it via the web UI, otherwise from env-var defaults. The admin route calls
+set_config() + stop() + start() for a live reload - no container restart.
 """
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote
 
 import httpx
 
-from ..config import get_settings
 from .base import Notifier, ReminderPayload
 
 logger = logging.getLogger(__name__)
-
-CALLMEBOT_URL = "https://api.callmebot.com/whatsapp.php"
 
 
 class WhatsAppNotifier(Notifier):
     name = "whatsapp"
 
     def __init__(self) -> None:
-        self._client: Optional[httpx.AsyncClient] = None
+        self._config: dict[str, Any] = {}
+
+    def set_config(self, config: dict) -> None:
+        self._config = dict(config)
+
+    @property
+    def config(self) -> dict:
+        return self._config
 
     async def is_enabled(self) -> bool:
-        s = get_settings()
-        return s.whatsapp_enabled and bool(s.whatsapp_phone) and bool(s.whatsapp_apikey)
+        return bool(self._config.get("enabled")) and bool(self._config.get("phone")) and bool(self._config.get("apikey"))
 
     async def start(self) -> None:
         if not await self.is_enabled():
-            logger.info("WhatsApp disabled - skipping start.")
+            logger.info("WhatsApp disabled or missing phone/apikey - skipping start.")
             return
-        self._client = httpx.AsyncClient(timeout=10.0)
+        logger.info("WhatsApp notifier ready (phone=%s).", self._config.get("phone"))
 
     async def stop(self) -> None:
-        if self._client:
-            await self._client.aclose()
+        # Nothing to stop - WhatsApp uses HTTP on demand.
+        pass
 
     async def send_reminder(self, user_id: int, payload: ReminderPayload) -> Optional[str]:
-        if not self._client:
+        if not await self.is_enabled():
             return None
-        s = get_settings()
+        phone = self._config.get("phone")
+        apikey = self._config.get("apikey")
         dose = f"{payload.dose} {payload.unit}" if payload.dose else ""
         text = (
-            f"💊 Supplement-Erinnerung\n"
+            f"\ud83d\udc8a Supplement-Erinnerung\n"
             f"{payload.supplement_name} {dose}\n"
-            f"⏰ Geplant: {payload.scheduled_for.strftime('%H:%M')}\n"
-            f"Bitte im Web-UI abhaken: {payload.action_url or ''}"
-        ).strip()
-
-        url = f"{CALLMEBOT_URL}?phone={s.whatsapp_phone}&text={quote(text)}&apikey={s.whatsapp_apikey}"
+            f"\u23f0 Geplant: {payload.scheduled_for.strftime('%H:%M')}\n"
+            f"\u2705 Im Web abhaken: {payload.action_url or '/'}"
+        )
+        url = f"https://api.callmebot.com/whatsapp.php?phone={quote(phone)}&text={quote(text)}&apikey={quote(apikey)}"
         try:
-            r = await self._client.get(url)
-            if r.status_code != 200:
-                logger.warning("CallMeBot send failed: %s %s", r.status_code, r.text[:200])
-                return None
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url)
+                if r.status_code == 200:
+                    logger.info("WhatsApp reminder sent to %s", phone)
+                    return "ok"
+                logger.warning("CallMeBot returned %s: %s", r.status_code, r.text[:200])
         except Exception as e:
-            logger.warning("CallMeBot request error: %s", e)
-            return None
-        return "callmebot-ok"
+            logger.warning("WhatsApp send failed: %s", e)
+        return None

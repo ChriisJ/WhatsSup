@@ -1,21 +1,23 @@
 """Discord notifier using discord.py v2 with interactive Buttons.
 
 Reminder messages contain three buttons:
-  [✅ Genommen] [⏰ Snooze 30min] [❌ Skip]
+  [\u2705 Genommen] [\u23f0 Snooze 30min] [\u274c Skip]
 Clicking one updates the corresponding IntakeLog and edits the original message.
+
+Config (token, channel, allowed users) is loaded from the DB if an admin has
+set it via the web UI, otherwise from the env-var defaults. The admin route
+calls set_config() + stop() + start() for a live reload - no container restart.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import discord
 from discord import ButtonStyle, Interaction
 from discord.ui import Button, View
 
-from ..config import get_settings
-from ..models import IntakeStatus
 from .base import ConfirmResult, Notifier, ReminderPayload
 
 logger = logging.getLogger(__name__)
@@ -60,21 +62,39 @@ class DiscordNotifier(Notifier):
         self._client: Optional[discord.Client] = None
         self._task: Optional[asyncio.Task] = None
         self._intake_repo = None  # set by main wiring: IntakeRepo-style callable
-        self._last_message_ids: dict[int, int] = {}  # intake_id -> discord msg id
+        self._last_message_ids: dict[int, int] = {}
+        # Effective runtime config. Populated by set_config() from admin route
+        # or by main.py lifespan from DB/env at startup. NOT cached lru_settings.
+        self._config: dict[str, Any] = {}
+
+    # ----- Config injection -----
+
+    def set_config(self, config: dict) -> None:
+        """Replace the effective config. Does NOT (re)start the bot \u2014 call
+        stop()/start() separately to apply."""
+        self._config = dict(config)
+
+    @property
+    def config(self) -> dict:
+        return self._config
+
+    # ----- Wiring -----
 
     def attach_intake_repo(self, repo) -> None:
-        """Attach a callable (intake_id, action) -> coroutine from the main app."""
+        """Attach a callable (action, **kwargs) -> coroutine from the main app."""
         self._intake_repo = repo
 
+    # ----- Notifier interface -----
+
     async def is_enabled(self) -> bool:
-        return get_settings().discord_enabled and bool(get_settings().discord_bot_token)
+        return bool(self._config.get("enabled")) and bool(self._config.get("bot_token"))
 
     async def start(self) -> None:
         if not await self.is_enabled():
-            logger.info("Discord disabled - skipping start.")
+            logger.info("Discord disabled or no token - skipping start.")
             return
 
-        s = get_settings()
+        token = self._config.get("bot_token")
         intents = discord.Intents.default()
         intents.message_content = True
         self._client = discord.Client(intents=intents)
@@ -90,12 +110,11 @@ class DiscordNotifier(Notifier):
                 return
             content = (message.content or "").strip().lower()
             if content.startswith("!med "):
-                # quick commands: !med list, !med today
                 await self._handle_command(message, content[5:])
 
         async def _runner():
             try:
-                await self._client.start(s.discord_bot_token)
+                await self._client.start(token)
             except Exception as e:
                 logger.exception("Discord bot crashed: %s", e)
 
@@ -107,6 +126,16 @@ class DiscordNotifier(Notifier):
                 await self._client.close()
             except Exception:
                 pass
+            self._client = None
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._task = None
+
+    # ----- Commands + reminder dispatch -----
 
     async def _handle_command(self, message: discord.Message, cmd: str):
         if not self._intake_repo:
@@ -114,11 +143,11 @@ class DiscordNotifier(Notifier):
         if cmd == "today":
             logs = await self._intake_repo("today", user_id=None, message=message)
             if not logs:
-                await message.channel.send("Heute keine Einträge.")
+                await message.channel.send("Heute keine Eintr\u00e4ge.")
                 return
             lines = ["**Heute auf dem Plan:**"]
             for log in logs:
-                marker = "✅" if log["status"] == "taken" else ("⏰" if log["status"] == "pending" else "❌")
+                marker = "\u2705" if log["status"] == "taken" else ("\u23f0" if log["status"] == "pending" else "\u274c")
                 lines.append(f"{marker} {log['time']} - {log['name']} ({log['dose']} {log['unit']})")
             await message.channel.send("\n".join(lines))
         elif cmd == "list":
@@ -131,15 +160,14 @@ class DiscordNotifier(Notifier):
     async def send_reminder(self, user_id: int, payload: ReminderPayload) -> Optional[str]:
         if not self._client:
             return None
-        s = get_settings()
         channel = None
-        if s.discord_channel_id:
+        channel_id = self._config.get("channel_id")
+        if channel_id:
             try:
-                channel = await self._client.fetch_channel(int(s.discord_channel_id))
+                channel = await self._client.fetch_channel(int(channel_id))
             except Exception:
                 channel = None
         if channel is None:
-            # Try DM the user
             try:
                 channel = await self._client.fetch_user(user_id).get_or_create_dm()
             except Exception:
@@ -148,7 +176,7 @@ class DiscordNotifier(Notifier):
 
         dose = f"{payload.dose} {payload.unit}" if payload.dose else ""
         embed = discord.Embed(
-            title="💊 Supplement-Erinnerung",
+            title="\ud83d\udc8a Supplement-Erinnerung",
             description=f"**{payload.supplement_name}** {dose}".strip(),
             color=discord.Color.blue(),
         )
@@ -158,7 +186,7 @@ class DiscordNotifier(Notifier):
             inline=True,
         )
         if payload.action_url:
-            embed.add_field(name="Web-UI", value=f"[Öffnen]({payload.action_url})", inline=False)
+            embed.add_field(name="Web-UI", value=f"[\u00d6ffnen]({payload.action_url})", inline=False)
 
         view = _build_view(payload.intake_id, self)
         msg = await channel.send(embed=embed, view=view)
@@ -170,12 +198,11 @@ class DiscordNotifier(Notifier):
             await interaction.response.send_message("Backend nicht verbunden.", ephemeral=True)
             return
 
-        # Permission check (if list configured)
-        s = get_settings()
-        if s.discord_allowed_user_set:
-            if str(interaction.user.id) not in s.discord_allowed_user_set:
-                await interaction.response.send_message("Nicht autorisiert.", ephemeral=True)
-                return
+        # Permission check (if allow-list configured)
+        allowed = self._config.get("allowed_users_set") or set()
+        if allowed and str(interaction.user.id) not in allowed:
+            await interaction.response.send_message("Nicht autorisiert.", ephemeral=True)
+            return
 
         if action == "taken":
             await self._intake_repo("confirm", intake_id=intake_id, via="discord")
@@ -184,10 +211,10 @@ class DiscordNotifier(Notifier):
                 embed=interaction.message.embeds[0] if interaction.message.embeds else None,
                 view=None,
             )
-            await interaction.followup.send("✅ Genommen markiert.", ephemeral=True)
+            await interaction.followup.send("\u2705 Genommen markiert.", ephemeral=True)
         elif action == "snooze":
             await self._intake_repo("snooze", intake_id=intake_id, minutes=30, via="discord")
-            await interaction.response.send_message("⏰ Snooze 30 Minuten.", ephemeral=True)
+            await interaction.response.send_message("\u23f0 Snooze 30 Minuten.", ephemeral=True)
         elif action == "skip":
             await self._intake_repo("skip", intake_id=intake_id, via="discord")
             await interaction.response.edit_message(
@@ -195,4 +222,4 @@ class DiscordNotifier(Notifier):
                 embed=interaction.message.embeds[0] if interaction.message.embeds else None,
                 view=None,
             )
-            await interaction.followup.send("❌ Übersprungen.", ephemeral=True)
+            await interaction.followup.send("\u274c \u00dcbersprungen.", ephemeral=True)

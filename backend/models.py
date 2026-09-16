@@ -189,3 +189,33 @@ class InteractionRule(Base):
     severity: Mapped[str] = mapped_column(String(16), default="warning")  # info, warning, danger
     description: Mapped[str] = mapped_column(Text, nullable=False)
     recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class BotConfig(Base):
+    """Runtime configuration for one of the notification bots.
+
+    Stored in the DB (not env vars) so an admin can edit it from the web UI
+    without redeploying. The row is keyed by `name` (discord|telegram|whatsapp).
+    If no row exists, the notifier falls back to the env-var defaults at
+    startup. After saving via the admin UI the notifier is hot-reloaded.
+    """
+
+    __tablename__ = "bot_configs"
+
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Token / apikey fields - sensitive, but we store as plaintext for the
+    # single-user self-hosted case. The DB file itself sits in the
+    # whatssup-data volume (same protection as the previous env-file).
+    bot_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    channel_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    guild_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    allowed_users: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # comma-separated Discord user IDs
+    allowed_chats: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # comma-separated Telegram chat IDs
+    phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    apikey: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extra: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON dump for forward-compat
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    updated_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )

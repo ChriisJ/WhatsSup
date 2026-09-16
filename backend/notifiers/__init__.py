@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
+from ..bot_config import parse_csv_set
 from .base import ConfirmResult, Notifier, ReminderPayload
 from .discord_bot import DiscordNotifier
 from .telegram_bot import TelegramNotifier
@@ -26,6 +27,21 @@ class NotifierManager:
             telegram=TelegramNotifier(),
             whatsapp=WhatsAppNotifier(),
         )
+
+    def by_name(self, name: str) -> Optional[Notifier]:
+        return {"discord": self.discord, "telegram": self.telegram, "whatsapp": self.whatsapp}.get(name)
+
+    def inject_config(self, name: str, raw_config: dict) -> None:
+        """Push the effective raw config into the named notifier, pre-parsing
+        comma-separated lists into sets so the notifier can do membership checks
+        without re-parsing on every reminder."""
+        n = self.by_name(name)
+        if n is None:
+            return
+        cfg = dict(raw_config)
+        cfg["allowed_users_set"] = parse_csv_set(cfg.get("allowed_users"))
+        cfg["allowed_chats_set"] = parse_csv_set(cfg.get("allowed_chats"))
+        n.set_config(cfg)
 
     def all_enabled(self) -> list[Notifier]:
         return [n for n in (self.discord, self.telegram, self.whatsapp) if n]

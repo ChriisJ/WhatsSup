@@ -1,14 +1,18 @@
-"""Telegram notifier with InlineKeyboard buttons."""
+"""Telegram notifier with InlineKeyboard buttons.
+
+Config (token, allowed chats) is loaded from the DB if an admin has set it
+via the web UI, otherwise from env-var defaults. The admin route calls
+set_config() + stop() + start() for a live reload - no container restart.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from telegram import Bot, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
-from ..config import get_settings
 from .base import Notifier, ReminderPayload
 
 logger = logging.getLogger(__name__)
@@ -17,9 +21,9 @@ logger = logging.getLogger(__name__)
 def _keyboard(intake_id: int):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Genommen", callback_data=f"taken:{intake_id}"),
-            InlineKeyboardButton("⏰ Snooze 30", callback_data=f"snooze:{intake_id}"),
-            InlineKeyboardButton("❌ Skip", callback_data=f"skip:{intake_id}"),
+            InlineKeyboardButton("\u2705 Genommen", callback_data=f"taken:{intake_id}"),
+            InlineKeyboardButton("\u23f0 Snooze 30", callback_data=f"snooze:{intake_id}"),
+            InlineKeyboardButton("\u274c Skip", callback_data=f"skip:{intake_id}"),
         ]
     ])
 
@@ -31,25 +35,38 @@ class TelegramNotifier(Notifier):
         self._app: Optional[Application] = None
         self._intake_repo = None
         self._last_chat_by_intake: dict[int, int] = {}
+        self._config: dict[str, Any] = {}
+
+    # ----- Config injection -----
+
+    def set_config(self, config: dict) -> None:
+        self._config = dict(config)
+
+    @property
+    def config(self) -> dict:
+        return self._config
+
+    # ----- Wiring -----
 
     def attach_intake_repo(self, repo) -> None:
         self._intake_repo = repo
 
+    # ----- Notifier interface -----
+
     async def is_enabled(self) -> bool:
-        return get_settings().telegram_enabled and bool(get_settings().telegram_bot_token)
+        return bool(self._config.get("enabled")) and bool(self._config.get("bot_token"))
 
     async def start(self) -> None:
         if not await self.is_enabled():
-            logger.info("Telegram disabled - skipping start.")
+            logger.info("Telegram disabled or no token - skipping start.")
             return
-        s = get_settings()
-        self._app = Application.builder().token(s.telegram_bot_token).build()
+        token = self._config.get("bot_token")
+        self._app = Application.builder().token(token).build()
         self._app.add_handler(CommandHandler("start", self._cmd_start))
         self._app.add_handler(CommandHandler("today", self._cmd_today))
         self._app.add_handler(CommandHandler("list", self._cmd_list))
         self._app.add_handler(CallbackQueryHandler(self._on_callback))
 
-        # run_polling is blocking; use a worker thread/coroutine
         await self._app.initialize()
         await self._app.start()
         await self._app.updater.start_polling()
@@ -63,10 +80,13 @@ class TelegramNotifier(Notifier):
                 await self._app.shutdown()
             except Exception:
                 pass
+            self._app = None
+
+    # ----- Commands + callback handler -----
 
     async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "Hi! Ich bin dein WhatsSup-Bot. Ich schicke dir Erinnerungen für deine Supplements.\n"
+            "Hi! Ich bin dein WhatsSup-Bot. Ich schicke dir Erinnerungen f\u00fcr deine Supplements.\n"
             "Befehle: /today, /list"
         )
 
@@ -80,8 +100,8 @@ class TelegramNotifier(Notifier):
             return
         lines = ["*Heute auf dem Plan:*"]
         for log in logs:
-            marker = "✅" if log["status"] == "taken" else ("⏰" if log["status"] == "pending" else "❌")
-            lines.append(f"{marker} {log['time']} – {log['name']} ({log['dose']} {log['unit']})")
+            marker = "\u2705" if log["status"] == "taken" else ("\u23f0" if log["status"] == "pending" else "\u274c")
+            lines.append(f"{marker} {log['time']} \u2013 {log['name']} ({log['dose']} {log['unit']})")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def _cmd_list(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -96,9 +116,9 @@ class TelegramNotifier(Notifier):
     async def _on_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query: CallbackQuery = update.callback_query
         await query.answer()
-        s = get_settings()
         chat_id = str(query.message.chat.id)
-        if s.telegram_allowed_chat_set and chat_id not in s.telegram_allowed_chat_set:
+        allowed = self._config.get("allowed_chats_set") or set()
+        if allowed and chat_id not in allowed:
             await query.edit_message_text("Nicht autorisiert.")
             return
 
@@ -114,34 +134,26 @@ class TelegramNotifier(Notifier):
         if action == "taken":
             await self._intake_repo("confirm", intake_id=intake_id, via="telegram")
             await query.edit_message_reply_markup(reply_markup=None)
-            await query.answer("✅ Genommen!")
+            await query.answer("\u2705 Genommen!")
         elif action == "snooze":
             await self._intake_repo("snooze", intake_id=intake_id, minutes=30, via="telegram")
-            await query.answer("⏰ Snooze 30 Minuten")
+            await query.answer("\u23f0 Snooze 30 Minuten")
         elif action == "skip":
             await self._intake_repo("skip", intake_id=intake_id, via="telegram")
             await query.edit_message_reply_markup(reply_markup=None)
-            await query.answer("❌ Übersprungen")
+            await query.answer("\u274c \u00dcbersprungen")
 
     async def send_reminder(self, user_id: int, payload: ReminderPayload) -> Optional[str]:
         if not self._app:
             return None
-        s = get_settings()
-
-        # Resolve the target chat(s). We broadcast to every chat in the
-        # allow-list - that's how a shared family bot works. If the list is
-        # empty we fall back to the last chat that interacted with the bot
-        # (so an empty config still works for a single-user ad-hoc deploy).
         targets: list[int] = []
-        for raw in s.telegram_allowed_chat_set:
+        for raw in (self._config.get("allowed_chats_set") or set()):
             try:
                 targets.append(int(raw))
             except (TypeError, ValueError):
                 continue
         if not targets and self._last_chat_by_intake:
-            # No explicit config but someone has used the bot before - reuse.
             targets = [self._last_chat_by_intake[payload.intake_id]]
-
         if not targets:
             logger.warning(
                 "Telegram enabled but no chat configured and no prior "
@@ -151,9 +163,9 @@ class TelegramNotifier(Notifier):
 
         dose = f"_{payload.dose} {payload.unit}_" if payload.dose else ""
         text = (
-            f"💊 *Supplement-Erinnerung*\n"
+            f"\ud83d\udc8a *Supplement-Erinnerung*\n"
             f"*{payload.supplement_name}* {dose}\n"
-            f"⏰ Geplant: {payload.scheduled_for.strftime('%H:%M')}"
+            f"\u23f0 Geplant: {payload.scheduled_for.strftime('%H:%M')}"
         )
 
         sent_ids: list[str] = []
