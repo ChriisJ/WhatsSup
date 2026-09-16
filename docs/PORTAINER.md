@@ -65,8 +65,8 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"          # adjust host port if 8000 is taken
-    env_file:
-      - .env                  # path INSIDE the stack - we use the web editor's env block instead
+    # All config via inline `environment` block below. Do NOT add an
+    # `env_file: - .env` line here - Portainer's stack cwd has no .env.
     environment:
       TZ: ${TZ}
       SECRET_KEY: ${SECRET_KEY}
