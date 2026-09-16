@@ -14,7 +14,7 @@ env:
   # repo's display casing (e.g. "ChriisJ/WhatsSup") which Docker refuses on
   # push and which GHCR resolves inconsistently for anonymous pulls, making
   # the image unpullable from clients. Pin it explicitly.
-  IMAGE_NAME: chrisjungmann/whatssup
+  IMAGE_NAME: chriisj/whatssup
 
 jobs:
   build:
