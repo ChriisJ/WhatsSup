@@ -124,6 +124,31 @@ async def get_bot_config(
     return await _build_out(session, name, notifier)
 
 
+async def _reload_notifier(name: str, request: Request, session: AsyncSession):
+    """Stop the notifier, push the effective (DB+env) config into it, and
+    restart if it is now enabled. Used by PUT / DELETE / POST restart so all
+    three reload paths pick up the latest settings."""
+    from ..bot_config import get_effective_config
+    notifier = _resolve_notifier(request, name)
+    manager = getattr(request.app.state, "notifiers", None)
+
+    # Pull fresh config from DB + env fallback, then inject into the notifier.
+    cfg = await get_effective_config(session, name)
+    if manager is not None:
+        manager.inject_config(name, cfg)
+
+    try:
+        await notifier.stop()
+    except Exception as e:
+        logger.warning("Error stopping %s for reload: %s", name, e)
+    try:
+        await notifier.start()
+        logger.info("Bot %s reloaded (enabled=%s)", name, cfg.get("enabled"))
+    except Exception as e:
+        logger.warning("Bot %s start failed after reload: %s", name, e)
+    return notifier
+
+
 @router.put("/bots/{name}", response_model=BotConfigOut)
 async def update_bot_config(
     name: str,
@@ -134,7 +159,6 @@ async def update_bot_config(
 ):
     if name not in {"discord", "telegram", "whatsapp"}:
         raise HTTPException(status_code=400, detail="Unknown bot")
-    notifier = _resolve_notifier(request, name)
 
     # Upsert the DB row.
     row = (await session.execute(select(BotConfig).where(BotConfig.name == name))).scalar_one_or_none()
@@ -153,17 +177,10 @@ async def update_bot_config(
     await session.commit()
     await session.refresh(row)
 
-    # Hot-reload the notifier.
-    try:
-        await notifier.stop()
-    except Exception as e:
-        logger.warning("Error stopping %s for reload: %s", name, e)
-    if body.enabled:
-        try:
-            await notifier.start()
-            logger.info("Bot %s hot-reloaded (DB override)", name)
-        except Exception as e:
-            logger.warning("Bot %s start failed after reload: %s", name, e)
+    # Hot-reload: re-read config from DB (now including this PUT), inject,
+    # stop, start. Without the inject_config call the notifier would keep
+    # its in-memory _config from the lifespan and ignore the new value.
+    notifier = await _reload_notifier(name, request, session)
 
     return await _build_out(session, name, notifier)
 
@@ -179,15 +196,7 @@ async def restart_bot(
     rotation on the bot-provider side, or to recover from a transient error)."""
     if name not in {"discord", "telegram", "whatsapp"}:
         raise HTTPException(status_code=400, detail="Unknown bot")
-    notifier = _resolve_notifier(request, name)
-    try:
-        await notifier.stop()
-    except Exception as e:
-        logger.warning("Error stopping %s: %s", name, e)
-    try:
-        await notifier.start()
-    except Exception as e:
-        logger.warning("Error starting %s: %s", name, e)
+    notifier = await _reload_notifier(name, request, session)
     return await _build_out(session, name, notifier)
 
 
@@ -201,19 +210,11 @@ async def delete_bot_override(
     """Remove the DB override; bot falls back to env-var defaults again."""
     if name not in {"discord", "telegram", "whatsapp"}:
         raise HTTPException(status_code=400, detail="Unknown bot")
-    notifier = _resolve_notifier(request, name)
 
     row = (await session.execute(select(BotConfig).where(BotConfig.name == name))).scalar_one_or_none()
     if row is not None:
         await session.delete(row)
         await session.commit()
 
-    try:
-        await notifier.stop()
-    except Exception as e:
-        logger.warning("Error stopping %s: %s", name, e)
-    try:
-        await notifier.start()
-    except Exception as e:
-        logger.warning("Error starting %s: %s", name, e)
+    notifier = await _reload_notifier(name, request, session)
     return await _build_out(session, name, notifier)
