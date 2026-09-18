@@ -84,65 +84,66 @@ async def reminder_tick(
         due = result.scalars().all()
 
         for log in due:
-            us = log.user_supplement
-            supp = us.supplement if us else None
-            if not us or not supp:
-                continue
-
-            # Throttle against the actual timestamp of the last reminder.
-            if log.last_reminded_at is not None:
-                elapsed = now - log.last_reminded_at
-                if elapsed < timedelta(minutes=interval):
-                    # Already reminded within this window; skip.
-                    continue
-            else:
-                # Never reminded. Suppress during quiet hours unless it's
-                # already overdue by more than the interval (i.e. it was
-                # due during the previous quiet period).
-                if quiet and now - log.scheduled_for < timedelta(minutes=interval):
+            try:
+                us = log.user_supplement
+                supp = us.supplement if us else None
+                if not us or not supp:
                     continue
 
-            user = log.user
-            profile = await session.get(UserProfile, user.id)
-            if not profile:
-                profile = UserProfile(user_id=user.id)
+                # Throttle against the actual timestamp of the last reminder.
+                if log.last_reminded_at is not None:
+                    elapsed = now - log.last_reminded_at
+                    if elapsed < timedelta(minutes=interval):
+                        # Already reminded within this window; skip.
+                        continue
+                else:
+                    # Never reminded. Suppress during quiet hours unless it's
+                    # already overdue by more than the interval (i.e. it was
+                    # due during the previous quiet period).
+                    if quiet and now - log.scheduled_for < timedelta(minutes=interval):
+                        continue
 
-            dose, unit = compute_recommended_dose(us, supp, profile)
-            payload = ReminderPayload(
-                intake_id=log.id,
-                supplement_name=supp.name,
-                dose=dose,
-                unit=unit,
-                scheduled_for=log.scheduled_for,
-                action_url=f"/?intake={log.id}",
-            )
+                user = log.user
+                profile = await session.get(UserProfile, user.id)
+                if not profile:
+                    profile = UserProfile(user_id=user.id)
 
-            # Decide which channels to send to
-            channels: list[str] = []
-            if profile.notify_web:
-                channels.append("web")
-            if profile.notify_discord and await notifiers.discord.is_enabled():
-                channels.append("discord")
-            if profile.notify_telegram and await notifiers.telegram.is_enabled():
-                channels.append("telegram")
-            if profile.notify_whatsapp and await notifiers.whatsapp.is_enabled():
-                channels.append("whatsapp")
+                dose, unit = compute_recommended_dose(us, supp, profile)
+                payload = ReminderPayload(
+                    intake_id=log.id,
+                    supplement_name=supp.name,
+                    dose=dose,
+                    unit=unit,
+                    scheduled_for=log.scheduled_for,
+                    action_url=f"/?intake={log.id}",
+                )
 
-            await notifiers.broadcast_reminder(user.id, payload)
-            log.last_reminded_at = now
-            log.reminder_count += 1
-            logger.info(
-                "Reminded user=%s supplement=%s channels=%s count=%s/%s",
-                user.username, supp.name, channels, log.reminder_count, _MAX_REMINDERS,
-            )
-        except Exception as exc:
-            # The reminder loop MUST keep running even if one intake raises.
-            # Capture the full traceback so the logs show which line in our
-            # code (or in a notifier) triggered the failure.
-            logger.exception(
-                "reminder_tick failed processing intake=%s supplement=%s",
-                log.id, supp.name,
-            )
+                # Decide which channels to send to
+                channels: list[str] = []
+                if profile.notify_web:
+                    channels.append("web")
+                if profile.notify_discord and await notifiers.discord.is_enabled():
+                    channels.append("discord")
+                if profile.notify_telegram and await notifiers.telegram.is_enabled():
+                    channels.append("telegram")
+                if profile.notify_whatsapp and await notifiers.whatsapp.is_enabled():
+                    channels.append("whatsapp")
+
+                await notifiers.broadcast_reminder(user.id, payload)
+                log.last_reminded_at = now
+                log.reminder_count += 1
+                logger.info(
+                    "Reminded user=%s supplement=%s channels=%s count=%s/%s",
+                    user.username, supp.name, channels, log.reminder_count, _MAX_REMINDERS,
+                )
+            except Exception as exc:
+                # The reminder loop MUST keep running even if one intake raises.
+                # Capture the full traceback so the logs show which line in our
+                # code (or in a notifier) triggered the failure.
+                logger.exception(
+                    "reminder_tick failed processing intake=%s supplement=%s",
+                    log.id, supp.name,
+                )
 
         # Mark very stale PENDING as MISSED (still 6h cutoff - gives the
         # _MAX_REMINDERS cap room to be the first line of defence).

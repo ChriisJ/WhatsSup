@@ -194,32 +194,55 @@ class DiscordNotifier(Notifier):
         return str(msg.id)
 
     async def _handle_button(self, interaction: Interaction, intake_id: int, action: str):
+        # Discord requires a response within 3 seconds or it shows "didn't
+        # respond in time". Defer immediately so we can take our time with
+        # the DB work; the followup/edit_message calls below become the
+        # "real" response once the work is done.
+        try:
+            await interaction.response.defer()
+        except Exception:
+            # Already responded to, or interaction expired - continue anyway.
+            pass
+
         if not self._intake_repo:
-            await interaction.response.send_message("Backend nicht verbunden.", ephemeral=True)
+            await interaction.followup.send("Backend nicht verbunden.", ephemeral=True)
             return
 
         # Permission check (if allow-list configured)
         allowed = self._config.get("allowed_users_set") or set()
         if allowed and str(interaction.user.id) not in allowed:
-            await interaction.response.send_message("Nicht autorisiert.", ephemeral=True)
+            await interaction.followup.send("Nicht autorisiert.", ephemeral=True)
             return
 
-        if action == "taken":
-            await self._intake_repo("confirm", intake_id=intake_id, via="discord")
-            await interaction.response.edit_message(
-                content=None,
-                embed=interaction.message.embeds[0] if interaction.message.embeds else None,
-                view=None,
-            )
-            await interaction.followup.send("\u2705 Genommen markiert.", ephemeral=True)
-        elif action == "snooze":
-            await self._intake_repo("snooze", intake_id=intake_id, minutes=30, via="discord")
-            await interaction.response.send_message("\u23f0 Snooze 30 Minuten.", ephemeral=True)
-        elif action == "skip":
-            await self._intake_repo("skip", intake_id=intake_id, via="discord")
-            await interaction.response.edit_message(
-                content=None,
-                embed=interaction.message.embeds[0] if interaction.message.embeds else None,
-                view=None,
-            )
-            await interaction.followup.send("\u274c \u00dcbersprungen.", ephemeral=True)
+        try:
+            if action == "taken":
+                await self._intake_repo("confirm", intake_id=intake_id, via="discord")
+                try:
+                    await interaction.message.edit(
+                        embed=interaction.message.embeds[0] if interaction.message.embeds else None,
+                        view=None,
+                    )
+                except Exception:
+                    pass
+                await interaction.followup.send("\u2705 Genommen markiert.", ephemeral=True)
+            elif action == "snooze":
+                await self._intake_repo("snooze", intake_id=intake_id, minutes=30, via="discord")
+                await interaction.followup.send("\u23f0 Snooze 30 Minuten.", ephemeral=True)
+            elif action == "skip":
+                await self._intake_repo("skip", intake_id=intake_id, via="discord")
+                try:
+                    await interaction.message.edit(
+                        embed=interaction.message.embeds[0] if interaction.message.embeds else None,
+                        view=None,
+                    )
+                except Exception:
+                    pass
+                await interaction.followup.send("\u274c \u00dcbersprungen.", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Unbekannte Aktion: {action}", ephemeral=True)
+        except Exception as exc:
+            logger.exception("Discord button handler failed for intake=%s action=%s", intake_id, action)
+            try:
+                await interaction.followup.send(f"\u274c Fehler: {exc}", ephemeral=True)
+            except Exception:
+                pass
