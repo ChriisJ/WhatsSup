@@ -135,6 +135,14 @@ async def reminder_tick(
                 "Reminded user=%s supplement=%s channels=%s count=%s/%s",
                 user.username, supp.name, channels, log.reminder_count, _MAX_REMINDERS,
             )
+        except Exception as exc:
+            # The reminder loop MUST keep running even if one intake raises.
+            # Capture the full traceback so the logs show which line in our
+            # code (or in a notifier) triggered the failure.
+            logger.exception(
+                "reminder_tick failed processing intake=%s supplement=%s",
+                log.id, supp.name,
+            )
 
         # Mark very stale PENDING as MISSED (still 6h cutoff - gives the
         # _MAX_REMINDERS cap room to be the first line of defence).
