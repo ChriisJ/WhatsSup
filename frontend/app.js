@@ -669,15 +669,31 @@ function renderBotCard(b) {
     ? `<span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">aus DB</span>`
     : `<span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">aus .env</span>`;
   const enabled = !!b.enabled;
-  const fields = def.fields.map(f => `
+  const fields = def.fields.map(f => {
+    // For password-type fields (sensitive secrets), do NOT echo the actual
+    // value into the rendered HTML - browsers happily place it back into the
+    // input on submit but exposing the token in the DOM is unnecessary. Show
+    // a "stored" placeholder so the user knows a value is in place.
+    const isSecret = f.type === "password";
+    const hasStored = !!b[f.id];
+    const valueAttr = isSecret ? "" : `value="${(b[f.id] || "").replace(/"/g, "&quot;")}"`;
+    const placeholder = isSecret && hasStored
+      ? "•••••••• (gespeichert - leer lassen um zu behalten)"
+      : (f.placeholder || "");
+    const storedBadge = isSecret && hasStored
+      ? `<span class="text-xs text-emerald-400 ml-2">✓ gespeichert</span>`
+      : "";
+    return `
     <label class="block">
-      <span class="text-xs text-slate-400">${f.label}</span>
-      <input data-field="${f.id}" type="${f.type}" value="${(b[f.id] || "").replace(/"/g, "&quot;")}"
-             placeholder="${f.placeholder || ""}"
+      <span class="text-xs text-slate-400">${f.label}${storedBadge}</span>
+      <input data-field="${f.id}" type="${f.type}" ${valueAttr}
+             placeholder="${placeholder}"
+             autocomplete="off"
              class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700
                     focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-sm" />
     </label>
-  `).join("");
+  `;
+  }).join("");
 
   return `
     <div class="row-card rounded-xl p-4 space-y-3" data-bot="${b.name}">

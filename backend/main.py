@@ -72,6 +72,16 @@ async def lifespan(app: FastAPI):
 
     notifiers.discord.attach_intake_repo(_bridge)
     notifiers.telegram.attach_intake_repo(_bridge)
+    # Load effective config (DB override -> env fallback) into each notifier
+    # BEFORE first start, otherwise start() sees an empty _config and logs
+    # "disabled or no token" until something triggers a hot-reload.
+    async with AsyncSessionLocal() as session:
+        for name in ("discord", "telegram", "whatsapp"):
+            try:
+                cfg = await get_effective_config(session, name)
+                notifiers.inject_config(name, cfg)
+            except Exception as e:
+                logger.warning("Could not load initial config for %s: %s", name, e)
     await notifiers.start_all()
 
     # 3. Scheduler

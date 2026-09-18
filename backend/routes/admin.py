@@ -166,13 +166,20 @@ async def update_bot_config(
         row = BotConfig(name=name)
         session.add(row)
     row.enabled = body.enabled
-    row.bot_token = body.bot_token or None
-    row.channel_id = body.channel_id or None
-    row.guild_id = body.guild_id or None
-    row.allowed_users = body.allowed_users or None
-    row.allowed_chats = body.allowed_chats or None
-    row.phone = body.phone or None
-    row.apikey = body.apikey or None
+    # Secrets: only overwrite when the body provides a non-empty value. An
+    # empty password field on the form is the common case (user just wanted
+    # to toggle `enabled`) and MUST NOT nuke an existing stored token -
+    # otherwise the bot is silently killed by an empty-string PUT.
+    def _set_secret(field: str, value):
+        if value is not None and value != "":
+            setattr(row, field, value)
+    _set_secret("bot_token", body.bot_token)
+    _set_secret("channel_id", body.channel_id)
+    _set_secret("guild_id", body.guild_id)
+    _set_secret("allowed_users", body.allowed_users)
+    _set_secret("allowed_chats", body.allowed_chats)
+    _set_secret("phone", body.phone)
+    _set_secret("apikey", body.apikey)
     row.updated_by = current.id
     await session.commit()
     await session.refresh(row)
