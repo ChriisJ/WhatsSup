@@ -63,8 +63,13 @@ async def bot_action(session: AsyncSession, action: str, **kwargs) -> dict | Non
         log = await session.get(IntakeLog, intake_id)
         if not log:
             return {"ok": False, "reason": "not_found"}
+        # Keep status as PENDING so the scheduler's reminder_tick can still
+        # find this row when the snoozed time arrives. Setting it to SNOOZED
+        # sent the row into a dead state: filter is `status == PENDING`, so
+        # the log was never re-reminded and got stuck on the Today view.
         log.scheduled_for = datetime.now() + timedelta(minutes=minutes)
-        log.status = IntakeStatus.SNOOZED
+        log.status = IntakeStatus.PENDING
+        log.reminder_count = 0  # restart the reminder budget at the new time
         await session.commit()
         return {"ok": True, "until": log.scheduled_for.isoformat()}
 

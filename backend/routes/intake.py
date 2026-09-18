@@ -221,7 +221,11 @@ async def snooze(
     if not log or log.user_id != current.id:
         raise HTTPException(status_code=404, detail="Not found")
     log.scheduled_for = datetime.now() + timedelta(minutes=minutes)
-    log.status = IntakeStatus.SNOOZED
+    # Keep status as PENDING so the scheduler can re-remind at the snoozed
+    # time. Setting SNOOZED put the row into a dead state (scheduler only
+    # picks up PENDING logs). See bot_bridge.py for the matching action.
+    log.status = IntakeStatus.PENDING
+    log.reminder_count = 0
     await session.commit()
     await session.refresh(log)
     return await _build_intake_out_full(log, session)
